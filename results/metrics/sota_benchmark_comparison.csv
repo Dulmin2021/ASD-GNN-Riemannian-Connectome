@@ -1,0 +1,6 @@
+Model Architecture,Accuracy,F1-Score,AUC-ROC,Sensitivity,Specificity
+SVM (RBF Baseline),0.5420,0.3890,0.4670,0.0160,1.0000
+Baseline GAT (Notebook 04),0.5270,0.4960,0.5650,0.2620,0.7570
+Improved GAT (Notebook 07),0.5920,0.5800,0.5670,0.5780,0.5940
+ResGAT Ensemble (Notebook 09),0.5706,0.5704,0.5786,0.4754,0.5570
+★ Population GCN (Notebook 10),0.5500,0.5497,0.5568,0.5682,0.5342

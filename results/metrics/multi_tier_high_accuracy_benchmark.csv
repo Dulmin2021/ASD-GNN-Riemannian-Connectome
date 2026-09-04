@@ -1,0 +1,7 @@
+Evaluation Level,Method,Accuracy,AUC,Sensitivity,Specificity
+Full Dataset (N=871),SVM (RBF Baseline),54.20%,0.467,1.64%,100.0%
+Full Dataset (N=871),Baseline GAT (NB04),52.70%,0.565,26.23%,75.71%
+Full Dataset (N=871),Improved GAT (NB07),59.20%,0.567,57.79%,59.36%
+Full Dataset (N=871),ComBat Tangent SOTA,68.88%,0.755,69.17%,68.58%
+Major Sites (N=450+),Riemannian Tangent SOTA,69.72%,0.766,73.04%,66.36%
+NYU Site (N=184),★ Single-Site Tangent SOTA,70.35%,0.737,68.67%,71.47%

@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Large raw dataset caches (auto-downloadable via nilearn / notebooks)
+raw_data/ABIDE_pcp/
+raw_data/func_preproc/
+raw_data/rois_aal/
+
+# Temporary Office / Google Drive files
+~$*.docx
+~$*.pptx
+~$*.xlsx
+*.gdoc
+*.gsheet
+*.gslides
+
+# OS generated files
+.DS_Store
+Thumbs.db

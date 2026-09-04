@@ -1,0 +1,21 @@
+Rank,Node_A_idx,Node_A_name,Node_A_lobe,Node_B_idx,Node_B_name,Node_B_lobe,Importance_Score,Cross_lobe
+1,76,Thalamus L,Subcortical,109,Vermis 3,Cerebellar,0.924462,True
+2,19,Supp Motor Area R,Frontal,67,Precuneus R,Parietal,0.923833,True
+3,90,Cerebelum Crus1 L,Cerebellar,94,Cerebelum 3 L,Cerebellar,0.919453,False
+4,52,Occipital Inf L,Occipital,95,Cerebelum 3 R,Cerebellar,0.919146,True
+5,74,Pallidum L,Subcortical,106,Cerebelum 10 L,Cerebellar,0.918125,True
+6,46,Lingual L,Occipital,112,Vermis 7,Cerebellar,0.916464,True
+7,15,Frontal Inf Orb R,Frontal,90,Cerebelum Crus1 L,Cerebellar,0.910432,True
+8,46,Lingual L,Occipital,97,Cerebelum 4-5 R,Cerebellar,0.909496,True
+9,86,Temporal Pole Mid L,Temporal,105,Cerebelum 9 R,Cerebellar,0.904955,True
+10,75,Pallidum R,Subcortical,107,Cerebelum 10 R,Cerebellar,0.893694,True
+11,86,Temporal Pole Mid L,Temporal,102,Cerebelum 8 L,Cerebellar,0.892524,True
+12,86,Temporal Pole Mid L,Temporal,104,Cerebelum 9 L,Cerebellar,0.88726,True
+13,21,Olfactory R,Frontal,75,Pallidum R,Subcortical,0.886425,True
+14,8,Frontal Mid Orb L,Frontal,113,Vermis 8,Cerebellar,0.884047,True
+15,56,Postcentral L,Parietal,99,Cerebelum 6 R,Cerebellar,0.872989,True
+16,107,Cerebelum 10 R,Cerebellar,114,Vermis 9,Cerebellar,0.872364,False
+17,70,Caudate L,Subcortical,75,Pallidum R,Subcortical,0.871332,False
+18,107,Cerebelum 10 R,Cerebellar,115,Vermis 10,Cerebellar,0.857302,False
+19,24,Frontal Med Orb L,Frontal,108,Vermis 1-2,Cerebellar,0.847628,True
+20,0,Precentral L,Frontal,99,Cerebelum 6 R,Cerebellar,0.84418,True

@@ -1,0 +1,2 @@
+Model,Test_N,Accuracy,F1_Weighted,AUC_ROC,Sensitivity,Specificity,PPV,NPV,TP,TN,FP,FN
+GAT,131,0.542,0.3891,0.4665,0.0164,1.0,1.0,0.5385,1,70,0,60
