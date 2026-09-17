@@ -1,0 +1,28 @@
+# Core Deep Learning & Graph Neural Networks
+torch>=2.0.0
+torch-geometric>=2.3.0
+torch-scatter>=2.1.0
+torch-sparse>=0.6.17
+
+# Neuroimaging & Connectomics
+nilearn>=0.10.0
+nibabel>=5.0.0
+scipy>=1.10.0
+numpy>=1.23.0
+pandas>=1.5.0
+
+# Machine Learning & Riemannian Geometry
+scikit-learn>=1.2.0
+pyriemann>=0.4.0
+joblib>=1.2.0
+
+# Visualization & Explainability
+matplotlib>=3.6.0
+seaborn>=0.12.0
+networkx>=3.0
+plotly>=5.14.0
+
+# Document & Utilities
+tqdm>=4.65.0
+python-docx>=1.1.0
+jupyterlab>=3.6.0
