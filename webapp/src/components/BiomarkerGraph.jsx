@@ -20,8 +20,14 @@ export default function BiomarkerGraph({ nodes, edges }) {
   const svgRef = useRef(null)
 
   useEffect(() => {
-    if (!nodes || !edges) return
+    if (!nodes || !edges || !svgRef.current) return
     const W = 560, H = 400
+
+    // Deep-clone to prevent D3 forceLink from mutating React state objects
+    // (D3 replaces integer source/target with full node object references)
+    const simNodes = nodes.map(n => ({ ...n }))
+    const simEdges = edges.map(e => ({ ...e }))
+
     d3.select(svgRef.current).selectAll('*').remove()
 
     const svg = d3.select(svgRef.current)
@@ -38,9 +44,9 @@ export default function BiomarkerGraph({ nodes, edges }) {
         .attr('font-size', 9).attr('fill', '#475569')
     })
 
-    // Force simulation
-    const sim = d3.forceSimulation(nodes)
-      .force('link',   d3.forceLink(edges).id(d => d.id).distance(d => d.type === 'long-range' ? 130 : 70))
+    // Force simulation (use cloned arrays so React props stay immutable)
+    const sim = d3.forceSimulation(simNodes)
+      .force('link',   d3.forceLink(simEdges).id(d => d.id).distance(d => d.type === 'long-range' ? 130 : 70))
       .force('charge', d3.forceManyBody().strength(-220))
       .force('center', d3.forceCenter(W / 2, H / 2))
       .force('x',      d3.forceX(W / 2).strength(0.04))
@@ -48,7 +54,7 @@ export default function BiomarkerGraph({ nodes, edges }) {
 
     const edgeG = svg.append('g')
     const edgeSel = edgeG.selectAll('line')
-      .data(edges).join('line')
+      .data(simEdges).join('line')
       .attr('stroke', d => EDGE_COLORS[d.type] || '#94a3b8')
       .attr('stroke-width', d => 1 + d.weight * 3)
       .attr('stroke-dasharray', d => d.type === 'intra-lobar' ? '5,4' : '0')
@@ -56,7 +62,7 @@ export default function BiomarkerGraph({ nodes, edges }) {
 
     const nodeG = svg.append('g')
     const nodeSel = nodeG.selectAll('g')
-      .data(nodes).join('g')
+      .data(simNodes).join('g')
       .style('cursor', 'pointer')
       .call(
         d3.drag()

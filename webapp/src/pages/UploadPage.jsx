@@ -29,6 +29,7 @@ export default function UploadPage() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!file)  { setError('Please select a NIfTI scan file (.nii or .nii.gz).'); return }
     if (!site)  { setError('Please select an acquisition site.'); return }
     setLoading(true)
     setError(null)

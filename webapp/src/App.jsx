@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import UploadPage from './pages/UploadPage'
 import ResultsPage from './pages/ResultsPage'
@@ -7,7 +7,7 @@ import DashboardPage from './pages/DashboardPage'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="min-h-screen flex flex-col">
         <Navbar />
         <main className="flex-1 pt-16">
@@ -23,6 +23,6 @@ export default function App() {
           ASD Connectome Diagnostic Platform &mdash; Explainable GAT + Riemannian Harmonization &mdash; Research Prototype
         </footer>
       </div>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
