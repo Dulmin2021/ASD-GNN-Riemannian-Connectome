@@ -35,12 +35,17 @@ export default function ResultsPage() {
         <RiskGauge score={result.risk_score} />
 
         <div className="flex-1 space-y-4">
-          <div>
-            <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Classification</p>
-            {isASD
-              ? <span className="badge-asd text-base px-4 py-1.5"><XCircle className="w-4 h-4" /> {result.classification}</span>
-              : <span className="badge-tc  text-base px-4 py-1.5"><CheckCircle className="w-4 h-4" /> {result.classification}</span>
-            }
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Classification</p>
+              {isASD
+                ? <span className="badge-asd text-base px-4 py-1.5"><XCircle className="w-4 h-4" /> {result.classification}</span>
+                : <span className="badge-tc  text-base px-4 py-1.5"><CheckCircle className="w-4 h-4" /> {result.classification}</span>
+              }
+            </div>
+            <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${result.isLiveBackend ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+              {result.isLiveBackend ? '● Live FastAPI Server' : '● Benchmark Engine'}
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
