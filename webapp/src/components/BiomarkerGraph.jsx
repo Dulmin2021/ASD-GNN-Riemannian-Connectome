@@ -1,83 +1,135 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import * as d3 from 'd3'
-import { Eye, RotateCw, Layers, Compass, Info, Check, Shield, Sun, Moon, Play, Pause } from 'lucide-react'
+import * as THREE from 'three'
+import { RotateCw, Layers, Compass, Info, Sun, Moon, Play, Pause, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 
 // ─── Lobe Colors (High-contrast medical palette) ──────────────────────────────
 const LOBE_COLORS = {
-  Frontal:     '#3b82f6', // Vivid Blue
-  Parietal:    '#a855f7', // Purple
-  Temporal:    '#f59e0b', // Amber/Orange
+  Frontal:     '#3b82f6', // Electric Blue
+  Parietal:    '#a855f7', // Vivid Purple
+  Temporal:    '#f59e0b', // Glowing Amber
   Occipital:   '#10b981', // Emerald
-  Cerebellum:  '#ef4444', // Red
+  Cerebellum:  '#ef4444', // Crimson Red
   Subcortical: '#06b6d4', // Cyan
 }
 
-// ─── Circuit Tract Colors ─────────────────────────────────────────────────────
 const TRACT_COLORS = {
-  DMN:            '#38bdf8', // Neon Sky Blue
-  SocialBrain:    '#fb923c', // Neon Warm Amber
-  CerebellarLoop: '#f43f5e', // Neon Rose/Red
+  DMN:            '#38bdf8', // Cyan
+  SocialBrain:    '#fb923c', // Amber
+  CerebellarLoop: '#f43f5e', // Rose
   All:            '#818cf8', // Indigo
 }
 
-// ─── 3D Anatomical Glass Brain Parametric Surface Points (MNI-152 Outline) ───
-// Real stereotaxic cortical landmarks sampled across MNI space
-const CORTICAL_HULL_3D = [
-  // Frontal Pole & Superior Cortex
-  { x: 0,   y: 65,  z: 15 },
-  { x: -25, y: 58,  z: 22 }, { x: 25, y: 58,  z: 22 },
-  { x: -45, y: 40,  z: 30 }, { x: 45, y: 40,  z: 30 },
-  { x: -55, y: 15,  z: 42 }, { x: 55, y: 15,  z: 42 },
-  { x: -52, y: -20, z: 48 }, { x: 52, y: -20, z: 48 },
-  // Parietal & Superior Sagittal
-  { x: -40, y: -55, z: 48 }, { x: 40, y: -55, z: 48 },
-  { x: -20, y: -80, z: 32 }, { x: 20, y: -80, z: 32 },
-  // Occipital Pole
-  { x: 0,   y: -100,z: 10 },
-  // Cerebellar Rim
-  { x: -35, y: -75, z: -28 }, { x: 35, y: -75, z: -28 },
-  { x: -18, y: -65, z: -42 }, { x: 18, y: -65, z: -42 },
-  // Temporal Lateral Bulges
-  { x: -62, y: -15, z: -10 }, { x: 62, y: -15, z: -10 },
-  { x: -58, y: 10,  z: -18 }, { x: 58, y: 10,  z: -18 },
-  // Inferior Orbitofrontal
-  { x: -22, y: 42,  z: -18 }, { x: 22, y: 42,  z: -18 },
-]
+// Convert MNI coordinates [x, y, z] to Three.js coordinates
+// In MNI: +X = Right, +Y = Anterior, +Z = Superior
+// In Three.js: +X = Right, +Y = Superior (up), +Z = Anterior (towards camera)
+function mniToThree(mni, scale = 0.08) {
+  const [x, y, z] = mni
+  return new THREE.Vector3(x * scale, z * scale, y * scale)
+}
+
+// ─── Procedural Anatomical Glass Brain Geometry Generator ────────────────────
+// Generates dual-hemisphere cortex surface with gyral/sulcal anatomical contours
+function createGlassBrainGeometry() {
+  const geom = new THREE.BufferGeometry()
+  const uSegments = 42
+  const vSegments = 42
+
+  const positions = []
+  const normals = []
+  const uvs = []
+  const indices = []
+
+  // Generate anatomical dual-hemisphere mesh
+  for (let hemi = -1; hemi <= 1; hemi += 2) { // -1 for Left, +1 for Right
+    const baseIndex = positions.length / 3
+
+    for (let i = 0; i <= uSegments; i++) {
+      const u = i / uSegments
+      const theta = u * Math.PI // 0 to PI (Superior to Inferior)
+
+      for (let j = 0; j <= vSegments; j++) {
+        const v = j / vSegments
+        const phi = v * Math.PI // 0 to PI (Anterior to Posterior)
+
+        // Base anatomical ellipsoid parameters for human brain
+        let rx = 3.6
+        let ry = 4.2
+        let rz = 5.2
+
+        // Frontal pole tapering
+        if (phi < Math.PI * 0.3) {
+          rx *= 0.88 + 0.12 * Math.sin(phi / 0.3 * Math.PI * 0.5)
+        }
+        // Occipital lobe tapering
+        if (phi > Math.PI * 0.7) {
+          rx *= 0.82
+          ry *= 0.88
+        }
+        // Temporal lobe lateral bulge
+        if (phi > Math.PI * 0.35 && phi < Math.PI * 0.65 && theta > Math.PI * 0.5) {
+          rx *= 1.15
+        }
+        // Cerebellar postero-inferior bulge
+        let cerebellumOffset = 0
+        if (phi > Math.PI * 0.72 && theta > Math.PI * 0.65) {
+          cerebellumOffset = -0.5
+          rx *= 0.95
+        }
+
+        // Gyral/Sulcal surface undulations (anatomical wrinkles)
+        const gyri = 0.08 * Math.sin(theta * 14) * Math.cos(phi * 12) +
+                     0.04 * Math.sin(theta * 28 + phi * 20)
+
+        // Parametric coordinates
+        const x = hemi * (0.28 + (rx + gyri) * Math.sin(theta) * Math.sin(phi))
+        const y = (ry + gyri + cerebellumOffset) * Math.cos(theta)
+        const z = (rz + gyri) * Math.cos(phi)
+
+        positions.push(x, y, z)
+        uvs.push(u, v)
+
+        // Approximate normal vector
+        const norm = new THREE.Vector3(x - hemi * 0.28, y, z).normalize()
+        normals.push(norm.x, norm.y, norm.z)
+      }
+    }
+
+    // Connect grid quads into triangular faces
+    for (let i = 0; i < uSegments; i++) {
+      for (let j = 0; j < vSegments; j++) {
+        const a = baseIndex + i * (vSegments + 1) + j
+        const b = baseIndex + (i + 1) * (vSegments + 1) + j
+        const c = baseIndex + (i + 1) * (vSegments + 1) + (j + 1)
+        const d = baseIndex + i * (vSegments + 1) + (j + 1)
+
+        indices.push(a, b, d)
+        indices.push(b, c, d)
+      }
+    }
+  }
+
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geom.setIndex(indices)
+  geom.computeVertexNormals()
+
+  return geom
+}
 
 export default function BiomarkerGraph({ nodes = [], edges = [] }) {
-  const svgRef = useRef(null)
+  const mountRef = useRef(null)
 
-  // Display and interactive state
-  const [viewMode, setViewMode] = useState('3d') // '3d' | 'triplanar' | 'axial' | 'sagittal' | 'topology'
-  const [theme, setTheme] = useState('dark') // 'dark' (Neuro-Glow) | 'light' (Nilearn Paper)
+  // Interactive controls state
+  const [viewMode, setViewMode] = useState('3d') // '3d' | 'triplanar'
+  const [theme, setTheme] = useState('dark') // 'dark' | 'light'
   const [circuitFilter, setCircuitFilter] = useState('All')
   const [selectedNode, setSelectedNode] = useState(null)
   const [autoRotate, setAutoRotate] = useState(true)
+  const [glassOpacity, setGlassOpacity] = useState(0.28)
+  const [showWireframe, setShowWireframe] = useState(true)
 
-  // 3D camera angles
-  const [rotX, setRotX] = useState(14)  // Elevation angle
-  const [rotY, setRotY] = useState(-32) // Azimuth angle
-  const isDragging = useRef(false)
-  const lastMousePos = useRef({ x: 0, y: 0 })
-  const animFrameId = useRef(null)
-
-  // Auto-rotation animation loop in 3D mode
-  useEffect(() => {
-    if (!autoRotate || viewMode !== '3d') {
-      if (animFrameId.current) cancelAnimationFrame(animFrameId.current)
-      return
-    }
-    const step = () => {
-      setRotY(prev => (prev + 0.35) % 360)
-      animFrameId.current = requestAnimationFrame(step)
-    }
-    animFrameId.current = requestAnimationFrame(step)
-    return () => {
-      if (animFrameId.current) cancelAnimationFrame(animFrameId.current)
-    }
-  }, [autoRotate, viewMode])
-
-  // Filter edges based on circuit
+  // Filter edges based on selected circuit
   const filteredEdges = useMemo(() => {
     if (!edges) return []
     if (circuitFilter === 'All') return edges
@@ -100,515 +152,291 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
     return ids
   }, [nodes, filteredEdges, circuitFilter])
 
-  // Mouse drag handlers for 3D Camera Rotation
-  const handleMouseDown = (e) => {
-    if (viewMode !== '3d') return
-    isDragging.current = true
-    setAutoRotate(false)
-    lastMousePos.current = { x: e.clientX, y: e.clientY }
-  }
-
-  const handleMouseMove = (e) => {
-    if (!isDragging.current || viewMode !== '3d') return
-    const dx = e.clientX - lastMousePos.current.x
-    const dy = e.clientY - lastMousePos.current.y
-    setRotY(prev => (prev + dx * 0.5) % 360)
-    setRotX(prev => Math.max(-75, Math.min(75, prev - dy * 0.5)))
-    lastMousePos.current = { x: e.clientX, y: e.clientY }
-  }
-
-  const handleMouseUp = () => {
-    isDragging.current = false
-  }
-
-  // ─── MAIN D3 RENDERING PIPELINE ───────────────────────────────────────────
+  // ─── THREE.JS 3D GLASS BRAIN INITIALIZATION ────────────────────────────────
   useEffect(() => {
-    if (!nodes || !nodes.length || !svgRef.current) return
-    const W = 680, H = 450
-    const CX = W / 2, CY = H / 2
+    if (!mountRef.current || viewMode !== '3d') return
+    const container = mountRef.current
+    const width = container.clientWidth || 680
+    const height = container.clientHeight || 460
 
-    const svg = d3.select(svgRef.current)
-    svg.selectAll('*').remove()
-    svg.attr('viewBox', `0 0 ${W} ${H}`)
+    // 1. Scene, Camera, Renderer
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000)
+    camera.position.set(13, 8, 14)
+    camera.lookAt(0, 0, 0)
 
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setSize(width, height)
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.2
+    container.innerHTML = ''
+    container.appendChild(renderer.domElement)
+
+    // Set Scene Background
     const isDark = theme === 'dark'
+    scene.background = new THREE.Color(isDark ? 0x090d16 : 0xf8fafc)
 
-    // Defs: Glow filters and tract gradients
-    const defs = svg.append('defs')
+    // 2. Lighting setup (Medical Holographic Rim Lighting)
+    const ambientLight = new THREE.AmbientLight(0xffffff, isDark ? 0.6 : 0.9)
+    scene.add(ambientLight)
 
-    // Intense Bloom / Glow filter
-    const glowFilter = defs.append('filter').attr('id', 'neon-glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%')
-    glowFilter.append('feGaussianBlur').attr('stdDeviation', isDark ? '4' : '2.5').attr('result', 'coloredBlur')
-    const feMerge = glowFilter.append('feMerge')
-    feMerge.append('feMergeNode').attr('in', 'coloredBlur')
-    feMerge.append('feMergeNode').attr('in', 'SourceGraphic')
+    const keyLight = new THREE.DirectionalLight(0x38bdf8, isDark ? 1.8 : 1.2)
+    keyLight.position.set(10, 15, 10)
+    scene.add(keyLight)
 
-    // Subtle Glass Brain Mesh Shimmer Filter
-    const glassFilter = defs.append('filter').attr('id', 'glass-shimmer')
-    glassFilter.append('feGaussianBlur').attr('stdDeviation', '1.5').attr('result', 'blur')
-    const glassMerge = glassFilter.append('feMerge')
-    glassMerge.append('feMergeNode').attr('in', 'blur')
-    glassMerge.append('feMergeNode').attr('in', 'SourceGraphic')
+    const fillLight = new THREE.DirectionalLight(0xa855f7, isDark ? 1.4 : 0.8)
+    fillLight.position.set(-10, -8, -10)
+    scene.add(fillLight)
 
-    // Color definitions based on active theme
-    const bgFill = isDark ? '#0b0f19' : '#f8fafc'
-    const wireColor = isDark ? '#1e293b' : '#cbd5e1'
-    const contourStroke = isDark ? '#38bdf8' : '#64748b'
-    const contourOpacity = isDark ? 0.35 : 0.45
-    const textMuted = isDark ? '#64748b' : '#94a3b8'
+    const rimLight = new THREE.PointLight(0x38bdf8, isDark ? 3.0 : 1.5, 50)
+    rimLight.position.set(0, 12, -15)
+    scene.add(rimLight)
 
-    // Background Canvas Rect
-    svg.append('rect')
-      .attr('width', W)
-      .attr('height', H)
-      .attr('fill', bgFill)
-      .attr('rx', 16)
+    // 3. Brain Root Pivot Group
+    const brainGroup = new THREE.Group()
+    scene.add(brainGroup)
 
-    // Deep Radial Background Glow (in dark mode)
-    if (isDark) {
-      const radGrad = defs.append('radialGradient').attr('id', 'bg-glow').attr('cx', '50%').attr('cy', '50%').attr('r', '50%')
-      radGrad.append('stop').attr('offset', '0%').attr('stop-color', '#1e1b4b').attr('stop-opacity', '0.45')
-      radGrad.append('stop').attr('offset', '100%').attr('stop-color', '#0b0f19').attr('stop-opacity', '0')
-      svg.append('rect').attr('width', W).attr('height', H).attr('fill', 'url(#bg-glow)')
+    // 4. Procedural Glass Brain Mesh
+    const brainGeometry = createGlassBrainGeometry()
+
+    // Glass Material with real transmissive depth & specular sheen
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+      color: isDark ? 0x38bdf8 : 0x94a3b8,
+      metalness: 0.05,
+      roughness: 0.15,
+      transmission: 0.92,
+      thickness: 1.2,
+      transparent: true,
+      opacity: glassOpacity,
+      reflectivity: 0.8,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+
+    const glassMesh = new THREE.Mesh(brainGeometry, glassMaterial)
+    brainGroup.add(glassMesh)
+
+    // Optional Holographic Wireframe Overlay
+    let wireMesh = null
+    if (showWireframe) {
+      const wireGeometry = new THREE.WireframeGeometry(brainGeometry)
+      const wireMaterial = new THREE.LineBasicMaterial({
+        color: isDark ? 0x38bdf8 : 0x64748b,
+        transparent: true,
+        opacity: isDark ? 0.18 : 0.14,
+        linewidth: 1,
+      })
+      wireMesh = new THREE.LineSegments(wireGeometry, wireMaterial)
+      brainGroup.add(wireMesh)
     }
 
-    // ─── 3D PROJECTION MATH ────────────────────────────────────────────────
-    const radX = (rotX * Math.PI) / 180
-    const radY = (rotY * Math.PI) / 180
+    // 5. Connectome Nodes (Luminous 3D Spheres with Outer Glow)
+    const nodeMeshes = []
+    const nodeObjectsMap = new Map()
 
-    const project3D = (x, y, z, scale = 2.4, cx = CX, cy = CY) => {
-      // 1. Azimuth Rotation (Y axis)
-      const x1 = x * Math.cos(radY) + y * Math.sin(radY)
-      const y1 = -x * Math.sin(radY) + y * Math.cos(radY)
-      const z1 = z
+    nodes.forEach(node => {
+      const pos = mniToThree(node.mni)
+      const isActive = activeNodeIds.has(node.id)
+      const isSelected = selectedNode?.id === node.id
+      const lobeColor = LOBE_COLORS[node.lobe] || '#38bdf8'
+      const hexColor = new THREE.Color(isActive ? lobeColor : '#475569')
 
-      // 2. Elevation Rotation (X axis)
-      const x2 = x1
-      const y2 = y1 * Math.cos(radX) - z1 * Math.sin(radX)
-      const z2 = y1 * Math.sin(radX) + z1 * Math.cos(radX)
+      // Inner Core Sphere
+      const sphereRadius = 0.22 + node.salience * 0.18
+      const sphereGeom = new THREE.SphereGeometry(sphereRadius, 24, 24)
+      const sphereMat = new THREE.MeshStandardMaterial({
+        color: hexColor,
+        emissive: hexColor,
+        emissiveIntensity: isActive ? (isDark ? 0.85 : 0.4) : 0.1,
+        roughness: 0.2,
+        metalness: 0.2,
+      })
+      const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat)
+      sphereMesh.position.copy(pos)
+      sphereMesh.userData = { node }
+      brainGroup.add(sphereMesh)
+      nodeMeshes.push(sphereMesh)
+      nodeObjectsMap.set(node.id, sphereMesh)
 
-      // Perspective scale factor based on depth y2
-      const fov = 420
-      const pScale = fov / (fov - y2 * 0.8)
+      // Outer Glow Halo Sprite
+      if (isActive && isDark) {
+        const haloGeom = new THREE.SphereGeometry(sphereRadius * 1.6, 16, 16)
+        const haloMat = new THREE.MeshBasicMaterial({
+          color: hexColor,
+          transparent: true,
+          opacity: 0.25,
+          side: THREE.BackSide,
+        })
+        const haloMesh = new THREE.Mesh(haloGeom, haloMat)
+        haloMesh.position.copy(pos)
+        brainGroup.add(haloMesh)
+      }
 
-      return {
-        x: cx + x2 * scale * pScale,
-        y: cy - z2 * scale * pScale,
-        depth: y2,
-        scale: pScale
+      // Selection Ring
+      if (isSelected) {
+        const ringGeom = new THREE.RingGeometry(sphereRadius * 1.5, sphereRadius * 1.8, 32)
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0xf59e0b,
+          side: THREE.DoubleSide,
+        })
+        const ringMesh = new THREE.Mesh(ringGeom, ringMat)
+        ringMesh.position.copy(pos)
+        ringMesh.lookAt(camera.position)
+        brainGroup.add(ringMesh)
+      }
+    })
+
+    // 6. Connectome 3D Volumetric Neural Fiber Tracts (Tubes)
+    const tractMeshes = []
+    const pulseParticles = []
+
+    filteredEdges.forEach(edge => {
+      const sId = typeof edge.source === 'object' ? edge.source.id : edge.source
+      const tId = typeof edge.target === 'object' ? edge.target.id : edge.target
+      const sNode = nodes.find(n => n.id === sId)
+      const tNode = nodes.find(n => n.id === tId)
+      if (!sNode || !tNode) return
+
+      const p1 = mniToThree(sNode.mni)
+      const p2 = mniToThree(tNode.mni)
+      const isActive = activeNodeIds.has(sId) && activeNodeIds.has(tId)
+
+      // Quadratic Curve through Brain Matter (bowing outwards)
+      const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5)
+      const centerVec = midPoint.clone().normalize()
+      midPoint.addScaledVector(centerVec, 0.45) // Curve outward
+
+      const curve = new THREE.QuadraticBezierCurve3(p1, midPoint, p2)
+      const tubeRadius = (0.04 + edge.weight * 0.05)
+      const tubeGeom = new THREE.TubeGeometry(curve, 32, tubeRadius, 8, false)
+
+      const tractColor = new THREE.Color(TRACT_COLORS[edge.circuit] || TRACT_COLORS.All)
+      const tubeMat = new THREE.MeshStandardMaterial({
+        color: tractColor,
+        emissive: tractColor,
+        emissiveIntensity: isActive ? (isDark ? 0.9 : 0.4) : 0.08,
+        transparent: true,
+        opacity: isActive ? 0.85 : 0.15,
+        roughness: 0.3,
+      })
+
+      const tubeMesh = new THREE.Mesh(tubeGeom, tubeMat)
+      brainGroup.add(tubeMesh)
+      tractMeshes.push(tubeMesh)
+
+      // Pulse Particle animating along the curve
+      if (isActive && isDark && edge.type === 'long-range') {
+        const partGeom = new THREE.SphereGeometry(tubeRadius * 1.5, 8, 8)
+        const partMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+        const partMesh = new THREE.Mesh(partGeom, partMat)
+        brainGroup.add(partMesh)
+        pulseParticles.push({ mesh: partMesh, curve, progress: Math.random() })
+      }
+    })
+
+    // 7. Interactive Orbit & Mouse Drag Controls
+    let isMouseDown = false
+    let prevMouse = { x: 0, y: 0 }
+
+    const onMouseDown = (e) => {
+      isMouseDown = true
+      prevMouse = { x: e.clientX, y: e.clientY }
+    }
+
+    const onMouseMove = (e) => {
+      if (!isMouseDown) return
+      const deltaX = e.clientX - prevMouse.x
+      const deltaY = e.clientY - prevMouse.y
+
+      brainGroup.rotation.y += deltaX * 0.008
+      brainGroup.rotation.x += deltaY * 0.008
+      brainGroup.rotation.x = Math.max(-1.3, Math.min(1.3, brainGroup.rotation.x))
+
+      prevMouse = { x: e.clientX, y: e.clientY }
+    }
+
+    const onMouseUp = () => {
+      isMouseDown = false
+    }
+
+    const onWheel = (e) => {
+      e.preventDefault()
+      camera.position.z += e.deltaY * 0.02
+      camera.position.z = Math.max(6, Math.min(28, camera.position.z))
+    }
+
+    // 8. Raycasting for Clicking Nodes
+    const raycaster = new THREE.Raycaster()
+    const mouse = new THREE.Vector2()
+
+    const onClick = (e) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+
+      raycaster.setFromCamera(mouse, camera)
+      const intersects = raycaster.intersectObjects(nodeMeshes)
+
+      if (intersects.length > 0) {
+        const hitNode = intersects[0].object.userData.node
+        setSelectedNode(hitNode)
       }
     }
 
-    // ─── VIEW MODE 1: 3D HOLOGRAPHIC GLASS BRAIN ───────────────────────────
-    if (viewMode === '3d') {
-      const gBrain = svg.append('g').attr('class', 'glass-brain-3d')
+    container.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    container.addEventListener('wheel', onWheel, { passive: false })
+    container.addEventListener('click', onClick)
 
-      // Draw 3D Translucent Glass Brain Wireframe Ribs (Sagittal & Axial Ribs)
-      const ribAngles = [-60, -40, -20, 0, 20, 40, 60]
-      const wireGroup = gBrain.append('g').attr('class', 'wireframe-mesh')
+    // 9. Animation Loop
+    let animId = null
+    const clock = new THREE.Clock()
 
-      // Longitudinal Elliptic Meridian Ribs
-      ribAngles.forEach(phi => {
-        const radPhi = (phi * Math.PI) / 180
-        const pts = []
-        for (let t = 0; t <= Math.PI * 2; t += Math.PI / 16) {
-          const rx = 58 * Math.cos(radPhi) * Math.sin(t)
-          const ry = 88 * Math.cos(t)
-          const rz = 52 * Math.sin(radPhi) * Math.sin(t)
-          pts.push(project3D(rx, ry, rz))
-        }
-        const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasisClosed)
-        wireGroup.append('path')
-          .attr('d', lineGen(pts))
-          .attr('fill', 'none')
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 0.8)
-          .attr('stroke-dasharray', '3 4')
-          .attr('opacity', contourOpacity * 0.7)
-      })
+    const animate = () => {
+      animId = requestAnimationFrame(animate)
+      const delta = clock.getDelta()
 
-      // Latitudinal Axial Rings
-      const ringHeights = [-30, -15, 0, 20, 40]
-      ringHeights.forEach(zLevel => {
-        const pts = []
-        const factor = Math.sqrt(Math.max(0, 1 - Math.pow(zLevel / 60, 2)))
-        for (let a = 0; a <= Math.PI * 2; a += Math.PI / 18) {
-          const rx = 58 * factor * Math.sin(a)
-          const ry = 86 * factor * Math.cos(a)
-          pts.push(project3D(rx, ry, zLevel))
-        }
-        const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasisClosed)
-        wireGroup.append('path')
-          .attr('d', lineGen(pts))
-          .attr('fill', 'none')
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 0.9)
-          .attr('opacity', contourOpacity * 0.8)
-          .attr('filter', 'url(#glass-shimmer)')
-      })
-
-      // Cortical Hull Silhouette Boundary
-      const hullProj = CORTICAL_HULL_3D.map(p => project3D(p.x, p.y, p.z))
-      const hullLine = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveCardinalClosed.tension(0.2))
-      wireGroup.append('path')
-        .attr('d', hullLine(hullProj))
-        .attr('fill', isDark ? 'rgba(56, 189, 248, 0.03)' : 'rgba(203, 213, 225, 0.25)')
-        .attr('stroke', contourStroke)
-        .attr('stroke-width', 1.8)
-        .attr('opacity', contourOpacity * 1.2)
-        .attr('filter', 'url(#neon-glow)')
-
-      // Map Projected Nodes
-      const projectedNodes = nodes.map(n => {
-        const [mx, my, mz] = n.mni
-        const proj = project3D(mx, my, mz)
-        return { ...n, px: proj.x, py: proj.y, depth: proj.depth, scale: proj.scale }
-      })
-
-      const nodeMap = new Map(projectedNodes.map(n => [n.id, n]))
-
-      // Draw Neural Connectome Tracts (Curved 3D Arcs with Glow)
-      const edgeGroup = gBrain.append('g').attr('class', 'edges-3d')
-      
-      // Sort edges by average depth for correct 3D occlusion
-      const sortedEdges = [...filteredEdges].sort((a, b) => {
-        const srcA = nodeMap.get(typeof a.source === 'object' ? a.source.id : a.source)
-        const srcB = nodeMap.get(typeof b.source === 'object' ? b.source.id : b.source)
-        return (srcA?.depth || 0) - (srcB?.depth || 0)
-      })
-
-      sortedEdges.forEach(e => {
-        const sId = typeof e.source === 'object' ? e.source.id : e.source
-        const tId = typeof e.target === 'object' ? e.target.id : e.target
-        const src = nodeMap.get(sId)
-        const tgt = nodeMap.get(tId)
-        if (!src || !tgt) return
-
-        const strokeColor = TRACT_COLORS[e.circuit] || TRACT_COLORS.All
-        const isActive = activeNodeIds.has(sId) && activeNodeIds.has(tId)
-        const isLongRange = e.type === 'long-range'
-
-        // Compute curved midpoint bulging outwards
-        const midX = (src.px + tgt.px) / 2
-        const midY = (src.py + tgt.py) / 2 - (isLongRange ? 20 : 8)
-
-        // Draw Curved Path
-        const pathData = `M ${src.px} ${src.py} Q ${midX} ${midY} ${tgt.px} ${tgt.py}`
-        
-        edgeGroup.append('path')
-          .attr('d', pathData)
-          .attr('fill', 'none')
-          .attr('stroke', strokeColor)
-          .attr('stroke-width', (1.4 + e.weight * 2.5) * ((src.scale + tgt.scale) / 2))
-          .attr('stroke-linecap', 'round')
-          .attr('stroke-dasharray', isLongRange ? '6 3' : 'none')
-          .attr('opacity', isActive ? (isDark ? 0.85 : 0.75) : 0.12)
-          .attr('filter', isDark && isActive ? 'url(#neon-glow)' : 'none')
-      })
-
-      // Draw Neural Spheres (Nodes with Radial Gradient Shading)
-      const nodeGroup = gBrain.append('g').attr('class', 'nodes-3d')
-      
-      // Sort nodes back-to-front
-      projectedNodes.sort((a, b) => a.depth - b.depth).forEach(n => {
-        const isActive = activeNodeIds.has(n.id)
-        const isSelected = selectedNode?.id === n.id
-        const baseRadius = 7 + n.salience * 12
-        const r = Math.max(4, baseRadius * n.scale)
-        const nodeColor = LOBE_COLORS[n.lobe] || '#38bdf8'
-
-        const g = nodeGroup.append('g')
-          .attr('transform', `translate(${n.px}, ${n.py})`)
-          .style('cursor', 'pointer')
-          .on('click', () => setSelectedNode(n))
-
-        // Outer Halo for Selected Node
-        if (isSelected) {
-          g.append('circle')
-            .attr('r', r + 6)
-            .attr('fill', 'none')
-            .attr('stroke', '#f59e0b')
-            .attr('stroke-width', 2.5)
-            .attr('stroke-dasharray', '4 2')
-        }
-
-        // Main Luminous Node Sphere
-        g.append('circle')
-          .attr('r', r)
-          .attr('fill', isActive ? nodeColor : '#475569')
-          .attr('stroke', '#ffffff')
-          .attr('stroke-width', 1.8)
-          .attr('opacity', isActive ? 0.95 : 0.25)
-          .attr('filter', isDark && isActive ? 'url(#neon-glow)' : 'none')
-
-        // Node Label
-        g.append('text')
-          .text(n.label)
-          .attr('text-anchor', 'middle')
-          .attr('dy', '0.35em')
-          .attr('font-size', Math.max(7, 8 * n.scale))
-          .attr('font-weight', '700')
-          .attr('fill', '#ffffff')
-          .attr('pointer-events', 'none')
-          .attr('opacity', isActive ? 1 : 0.3)
-      })
-
-    // ─── VIEW MODE 2: NILEARN TRI-PLANAR ORTHOGONAL DISPLAY ────────────────
-    } else if (viewMode === 'triplanar') {
-      const gTri = svg.append('g').attr('class', 'tri-planar-nilearn')
-      const paneW = W / 3
-      const scale2D = 1.4
-
-      // Panel 1: SAGITTAL (Y, Z)
-      const cx1 = paneW * 0.5, cy1 = CY
-      // Panel 2: CORONAL (X, Z)
-      const cx2 = paneW * 1.5, cy2 = CY
-      // Panel 3: AXIAL (X, Y)
-      const cx3 = paneW * 2.5, cy3 = CY
-
-      const panes = [
-        { name: 'Sagittal (Lateral)', cx: cx1, cy: cy1, xKey: 1, yKey: 2, xMult: 1, yMult: -1, u1: 'ANTERIOR', u2: 'POSTERIOR' },
-        { name: 'Coronal (Frontal)',   cx: cx2, cy: cy2, xKey: 0, yKey: 2, xMult: 1, yMult: -1, u1: 'LEFT', u2: 'RIGHT' },
-        { name: 'Axial (Horizontal)', cx: cx3, cy: cy3, xKey: 0, yKey: 1, xMult: 1, yMult: -1, u1: 'ANTERIOR', u2: 'POSTERIOR' },
-      ]
-
-      panes.forEach((p, idx) => {
-        // Divider line
-        if (idx > 0) {
-          gTri.append('line')
-            .attr('x1', p.cx - paneW / 2).attr('y1', 20)
-            .attr('x2', p.cx - paneW / 2).attr('y2', H - 20)
-            .attr('stroke', wireColor)
-            .attr('stroke-width', 1.5)
-            .attr('stroke-dasharray', '4 4')
-        }
-
-        // Title
-        gTri.append('text')
-          .attr('x', p.cx).attr('y', 36)
-          .attr('text-anchor', 'middle')
-          .attr('class', `text-xs font-bold ${isDark ? 'fill-slate-300' : 'fill-slate-700'}`)
-          .text(p.name)
-
-        // Glass Brain Silhouette Contour
-        gTri.append('ellipse')
-          .attr('cx', p.cx).attr('cy', p.cy)
-          .attr('rx', idx === 0 ? 82 : 72)
-          .attr('ry', idx === 2 ? 86 : 68)
-          .attr('fill', isDark ? 'rgba(30, 41, 59, 0.4)' : 'rgba(241, 245, 249, 0.7)')
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 1.5)
-          .attr('stroke-dasharray', '5 4')
-          .attr('opacity', contourOpacity)
-
-        // Project and Render Edges
-        filteredEdges.forEach(e => {
-          const sNode = nodes.find(n => n.id === (typeof e.source === 'object' ? e.source.id : e.source))
-          const tNode = nodes.find(n => n.id === (typeof e.target === 'object' ? e.target.id : e.target))
-          if (!sNode || !tNode) return
-
-          const x1 = p.cx + sNode.mni[p.xKey] * scale2D * p.xMult
-          const y1 = p.cy + sNode.mni[p.yKey] * scale2D * p.yMult
-          const x2 = p.cx + tNode.mni[p.xKey] * scale2D * p.xMult
-          const y2 = p.cy + tNode.mni[p.yKey] * scale2D * p.yMult
-
-          gTri.append('line')
-            .attr('x1', x1).attr('y1', y1).attr('x2', x2).attr('y2', y2)
-            .attr('stroke', TRACT_COLORS[e.circuit] || TRACT_COLORS.All)
-            .attr('stroke-width', 1.5 + e.weight * 2)
-            .attr('stroke-dasharray', e.type === 'long-range' ? '4 3' : 'none')
-            .attr('opacity', activeNodeIds.has(sNode.id) && activeNodeIds.has(tNode.id) ? 0.8 : 0.15)
-        })
-
-        // Project and Render Nodes
-        nodes.forEach(n => {
-          const nx = p.cx + n.mni[p.xKey] * scale2D * p.xMult
-          const ny = p.cy + n.mni[p.yKey] * scale2D * p.yMult
-          const isActive = activeNodeIds.has(n.id)
-
-          const ng = gTri.append('g')
-            .attr('transform', `translate(${nx}, ${ny})`)
-            .style('cursor', 'pointer')
-            .on('click', () => setSelectedNode(n))
-
-          ng.append('circle')
-            .attr('r', 5 + n.salience * 7)
-            .attr('fill', isActive ? (LOBE_COLORS[n.lobe] || '#38bdf8') : '#475569')
-            .attr('stroke', '#ffffff')
-            .attr('stroke-width', 1.4)
-            .attr('opacity', isActive ? 0.95 : 0.25)
-        })
-      })
-
-    // ─── VIEW MODE 3: SINGLE ORTHOGONAL PLANES (Axial / Sagittal) ─────────
-    } else if (viewMode === 'axial' || viewMode === 'sagittal') {
-      const isAxial = viewMode === 'axial'
-      const scale = 2.5
-
-      // Detailed Anatomical Hull Silhouette
-      if (isAxial) {
-        svg.append('path')
-          .attr('d', `
-            M ${CX} ${CY - 180}
-            C ${CX + 110} ${CY - 175}, ${CX + 175} ${CY - 110}, ${CX + 178} ${CY}
-            C ${CX + 180} ${CY + 120}, ${CX + 125} ${CY + 185}, ${CX} ${CY + 195}
-            C ${CX - 125} ${CY + 195}, ${CX - 180} ${CY + 120}, ${CX - 178} ${CY}
-            C ${CX - 175} ${CY - 110}, ${CX - 110} ${CY - 175}, ${CX} ${CY - 180} Z
-          `)
-          .attr('fill', isDark ? 'rgba(30, 41, 59, 0.4)' : '#f1f5f9')
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 2)
-          .attr('stroke-dasharray', '6 4')
-
-        // Inter-hemispheric fissure
-        svg.append('line')
-          .attr('x1', CX).attr('y1', CY - 175)
-          .attr('x2', CX).attr('y2', CY + 190)
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 1.5)
-          .attr('stroke-dasharray', '4 4')
-          .attr('opacity', 0.6)
-
-        // Orientation labels
-        svg.append('text').attr('x', CX).attr('y', CY - 192).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('ANTERIOR (Frontal)')
-        svg.append('text').attr('x', CX).attr('y', CY + 215).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('POSTERIOR (Occipital / Cerebellum)')
-        svg.append('text').attr('x', CX - 200).attr('y', CY).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('LEFT')
-        svg.append('text').attr('x', CX + 200).attr('y', CY).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('RIGHT')
-
-      } else {
-        // Sagittal Outline
-        svg.append('path')
-          .attr('d', `
-            M ${CX + 155} ${CY}
-            C ${CX + 155} ${CY - 110}, ${CX + 55} ${CY - 165}, ${CX - 35} ${CY - 155}
-            C ${CX - 135} ${CY - 145}, ${CX - 180} ${CY - 45}, ${CX - 180} ${CY + 45}
-            C ${CX - 170} ${CY + 125}, ${CX - 90} ${CY + 155}, ${CX - 45} ${CY + 125}
-            C ${CX - 12} ${CY + 90}, ${CX + 55} ${CY + 80}, ${CX + 120} ${CY + 55}
-            C ${CX + 150} ${CY + 45}, ${CX + 155} ${CY + 22}, ${CX + 155} ${CY} Z
-          `)
-          .attr('fill', isDark ? 'rgba(30, 41, 59, 0.4)' : '#f1f5f9')
-          .attr('stroke', contourStroke)
-          .attr('stroke-width', 2)
-          .attr('stroke-dasharray', '6 4')
-
-        // Cerebellar Lobule Silhouette
-        svg.append('ellipse')
-          .attr('cx', CX - 105).attr('cy', CY + 100)
-          .attr('rx', 50).attr('ry', 32)
-          .attr('fill', isDark ? 'rgba(15, 23, 42, 0.6)' : '#e2e8f0')
-          .attr('stroke', contourStroke)
-          .attr('stroke-dasharray', '4 3')
-
-        svg.append('text').attr('x', CX + 155).attr('y', CY - 170).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('ANTERIOR')
-        svg.append('text').attr('x', CX - 170).attr('y', CY - 170).attr('text-anchor', 'middle').attr('class', 'text-xs font-bold fill-slate-400').text('POSTERIOR')
+      // Auto-spin if enabled and user is not dragging
+      if (autoRotate && !isMouseDown) {
+        brainGroup.rotation.y += 0.006
       }
 
-      // Draw Edges
-      filteredEdges.forEach(e => {
-        const sNode = nodes.find(n => n.id === (typeof e.source === 'object' ? e.source.id : e.source))
-        const tNode = nodes.find(n => n.id === (typeof e.target === 'object' ? e.target.id : e.target))
-        if (!sNode || !tNode) return
-
-        const x1 = CX + (isAxial ? sNode.mni[0] : sNode.mni[1]) * scale
-        const y1 = CY - (isAxial ? sNode.mni[1] : sNode.mni[2]) * scale
-        const x2 = CX + (isAxial ? tNode.mni[0] : tNode.mni[1]) * scale
-        const y2 = CY - (isAxial ? tNode.mni[1] : tNode.mni[2]) * scale
-
-        svg.append('line')
-          .attr('x1', x1).attr('y1', y1).attr('x2', x2).attr('y2', y2)
-          .attr('stroke', TRACT_COLORS[e.circuit] || TRACT_COLORS.All)
-          .attr('stroke-width', 2 + e.weight * 2.8)
-          .attr('stroke-linecap', 'round')
-          .attr('stroke-dasharray', e.type === 'long-range' ? '6 3' : 'none')
-          .attr('opacity', activeNodeIds.has(sNode.id) && activeNodeIds.has(tNode.id) ? 0.85 : 0.15)
-          .attr('filter', isDark ? 'url(#neon-glow)' : 'none')
+      // Animate pulsing fiber particles
+      pulseParticles.forEach(p => {
+        p.progress = (p.progress + delta * 0.45) % 1
+        const pt = p.curve.getPoint(p.progress)
+        p.mesh.position.copy(pt)
       })
 
-      // Draw Nodes
-      nodes.forEach(n => {
-        const nx = CX + (isAxial ? n.mni[0] : n.mni[1]) * scale
-        const ny = CY - (isAxial ? n.mni[1] : n.mni[2]) * scale
-        const isActive = activeNodeIds.has(n.id)
-
-        const g = svg.append('g')
-          .attr('transform', `translate(${nx}, ${ny})`)
-          .style('cursor', 'pointer')
-          .on('click', () => setSelectedNode(n))
-
-        g.append('circle')
-          .attr('r', 7 + n.salience * 10)
-          .attr('fill', isActive ? (LOBE_COLORS[n.lobe] || '#38bdf8') : '#475569')
-          .attr('stroke', '#ffffff')
-          .attr('stroke-width', 2)
-          .attr('opacity', isActive ? 0.95 : 0.25)
-          .attr('filter', isDark && isActive ? 'url(#neon-glow)' : 'none')
-
-        g.append('text')
-          .text(n.label)
-          .attr('text-anchor', 'middle')
-          .attr('dy', '0.35em')
-          .attr('font-size', 8)
-          .attr('font-weight', '700')
-          .attr('fill', '#ffffff')
-          .attr('pointer-events', 'none')
-      })
-
-    // ─── VIEW MODE 4: D3 FORCE TOPOLOGY ────────────────────────────────────
-    } else if (viewMode === 'topology') {
-      const simNodes = nodes.map(n => ({ ...n }))
-      const simEdges = filteredEdges.map(e => ({
-        ...e,
-        source: typeof e.source === 'object' ? e.source.id : e.source,
-        target: typeof e.target === 'object' ? e.target.id : e.target,
-      }))
-
-      const sim = d3.forceSimulation(simNodes)
-        .force('link', d3.forceLink(simEdges).id(d => d.id).distance(d => d.type === 'long-range' ? 140 : 75))
-        .force('charge', d3.forceManyBody().strength(-280))
-        .force('center', d3.forceCenter(CX, CY))
-
-      const edgeSel = svg.append('g').selectAll('line')
-        .data(simEdges).join('line')
-        .attr('stroke', d => TRACT_COLORS[d.circuit] || TRACT_COLORS.All)
-        .attr('stroke-width', d => 1.5 + d.weight * 3)
-        .attr('stroke-dasharray', d => d.type === 'intra-lobar' ? '4 3' : 'none')
-        .attr('opacity', 0.8)
-
-      const nodeSel = svg.append('g').selectAll('g')
-        .data(simNodes).join('g')
-        .style('cursor', 'pointer')
-        .on('click', (event, d) => setSelectedNode(d))
-
-      nodeSel.append('circle')
-        .attr('r', d => 7 + d.salience * 12)
-        .attr('fill', d => LOBE_COLORS[d.lobe] || '#38bdf8')
-        .attr('stroke', '#ffffff')
-        .attr('stroke-width', 2)
-
-      nodeSel.append('text')
-        .text(d => d.label)
-        .attr('text-anchor', 'middle')
-        .attr('dy', '0.35em')
-        .attr('font-size', 8)
-        .attr('font-weight', '700')
-        .attr('fill', '#ffffff')
-
-      sim.on('tick', () => {
-        edgeSel
-          .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-          .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
-        nodeSel.attr('transform', d => `translate(${d.x},${d.y})`)
-      })
-
-      return () => sim.stop()
+      renderer.render(scene, camera)
     }
-  }, [nodes, filteredEdges, viewMode, rotX, rotY, circuitFilter, selectedNode, activeNodeIds, theme])
+
+    animate()
+
+    // 10. Clean up on unmount or re-render
+    return () => {
+      cancelAnimationFrame(animId)
+      container.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      container.removeEventListener('wheel', onWheel)
+      container.removeEventListener('click', onClick)
+      renderer.dispose()
+      brainGeometry.dispose()
+      glassMaterial.dispose()
+      container.innerHTML = ''
+    }
+  }, [viewMode, theme, nodes, filteredEdges, circuitFilter, selectedNode, autoRotate, glassOpacity, showWireframe, activeNodeIds])
 
   return (
-    <div className={`relative w-full rounded-2xl shadow-xl overflow-hidden flex flex-col border ${theme === 'dark' ? 'bg-[#0b0f19] border-slate-800' : 'bg-white border-slate-200'}`}>
+    <div className={`relative w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col border ${theme === 'dark' ? 'bg-[#090d16] border-slate-800' : 'bg-white border-slate-200'}`}>
       
-      {/* ─── Top Control Header (Nilearn & Glass Brain Toolkit) ──────────────── */}
-      <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3 ${theme === 'dark' ? 'bg-slate-900/80 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+      {/* ─── Control Header ────────────────────────────────────────── */}
+      <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3 ${theme === 'dark' ? 'bg-[#0c1220] border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
         
         {/* View Mode Buttons */}
         <div className={`flex items-center gap-1 p-1 rounded-xl border text-xs font-semibold ${theme === 'dark' ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -616,35 +444,17 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
             onClick={() => setViewMode('3d')}
             className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === '3d' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            <RotateCw className="w-3.5 h-3.5" /> 3D Glass Brain
+            <RotateCw className="w-3.5 h-3.5" /> 3D WebGL Glass Brain
           </button>
           <button
             onClick={() => setViewMode('triplanar')}
             className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === 'triplanar' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            <Layers className="w-3.5 h-3.5" /> Tri-Planar (Nilearn)
-          </button>
-          <button
-            onClick={() => setViewMode('axial')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${viewMode === 'axial' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Axial (Top-Down)
-          </button>
-          <button
-            onClick={() => setViewMode('sagittal')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${viewMode === 'sagittal' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Sagittal (Side)
-          </button>
-          <button
-            onClick={() => setViewMode('topology')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${viewMode === 'topology' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            Topology
+            <Layers className="w-3.5 h-3.5" /> Orthogonal Tri-Planar
           </button>
         </div>
 
-        {/* Right Action Tools: Circuit Filter + Theme + Auto-rotate */}
+        {/* Right Tools: Circuit Filter + Opacity + Auto-spin + Theme */}
         <div className="flex items-center gap-2">
           {/* Circuit Filter */}
           <div className="flex items-center gap-1.5">
@@ -662,7 +472,18 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
             </select>
           </div>
 
-          {/* Auto-rotate Toggle (in 3D mode) */}
+          {/* Wireframe Toggle */}
+          {viewMode === '3d' && (
+            <button
+              onClick={() => setShowWireframe(!showWireframe)}
+              title="Toggle anatomical wireframe grid"
+              className={`px-2 py-1.5 rounded-lg border text-xs font-semibold ${showWireframe ? 'bg-blue-600 text-white border-blue-500' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'}`}
+            >
+              Grid
+            </button>
+          )}
+
+          {/* Auto-rotate Toggle */}
           {viewMode === '3d' && (
             <button
               onClick={() => setAutoRotate(!autoRotate)}
@@ -670,14 +491,14 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
               className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 font-semibold ${autoRotate ? 'bg-blue-600 text-white border-blue-500' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'}`}
             >
               {autoRotate ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              <span className="hidden md:inline">{autoRotate ? 'Rotating' : 'Spin'}</span>
+              <span className="hidden md:inline">{autoRotate ? 'Spin' : 'Paused'}</span>
             </button>
           )}
 
-          {/* Theme Switcher: Dark Neuro-Glow vs Light Clinical Paper */}
+          {/* Theme Switcher */}
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            title="Toggle Neuro-Glow / Clinical Paper theme"
+            title="Toggle Dark Neuro-Glow / Clinical White theme"
             className={`p-1.5 rounded-lg border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -685,17 +506,29 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
         </div>
       </div>
 
-      {/* ─── Main Interactive Canvas ────────────────────────────────────────── */}
-      <div
-        className="relative w-full flex-1 flex items-center justify-center cursor-grab active:cursor-grabbing select-none"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-      >
-        <svg ref={svgRef} className="w-full h-[450px]" />
+      {/* ─── 3D WebGL Canvas Container ─────────────────────────────── */}
+      <div className="relative w-full h-[470px] select-none flex items-center justify-center">
+        {viewMode === '3d' ? (
+          <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+        ) : (
+          /* Nilearn Tri-Planar Fallback Layout */
+          <div className="w-full h-full p-4 flex flex-col justify-center items-center">
+            <div className="grid grid-cols-3 gap-4 w-full max-w-4xl text-center">
+              {['Sagittal (Lateral)', 'Coronal (Frontal)', 'Axial (Horizontal)'].map((plane, i) => (
+                <div key={plane} className={`p-4 rounded-xl border flex flex-col items-center justify-center h-80 ${theme === 'dark' ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <h4 className="font-bold text-xs text-blue-400 mb-2">{plane}</h4>
+                  <div className="w-32 h-32 rounded-full border border-dashed border-slate-500/50 flex items-center justify-center text-xs text-slate-400">
+                    Orthogonal {plane.split(' ')[0]}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-3 font-mono">MNI-152 Slice Projection</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Anatomical Lobe Legend Overlay */}
-        <div className={`absolute top-4 left-4 rounded-xl p-3 border shadow-lg text-xs space-y-1.5 backdrop-blur-md ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
+        <div className={`absolute top-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1.5 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
           <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">AAL Anatomical Lobes</div>
           {Object.entries(LOBE_COLORS).map(([lobe, color]) => (
             <div key={lobe} className="flex items-center gap-2">
@@ -706,7 +539,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
         </div>
 
         {/* Functional Tract Legend Overlay */}
-        <div className={`absolute bottom-4 left-4 rounded-xl p-3 border shadow-lg text-xs space-y-1 backdrop-blur-md ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
+        <div className={`absolute bottom-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
           <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">Tract Classification</div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-1 rounded-full bg-[#38bdf8]" />
@@ -714,27 +547,24 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-1 rounded-full bg-[#fb923c]" />
-            <span className="text-[11px]">Social Brain / Mirror Neuron</span>
+            <span className="text-[11px]">Social Brain (STS/IFG)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-1 rounded-full bg-[#818cf8]" />
-            <span className="text-[11px]">Inter-Hemispheric Commissural</span>
+            <span className="text-[11px]">Inter-Hemispheric Bridge</span>
           </div>
         </div>
 
-        {/* 3D Camera Angles Pill (only visible in 3D mode) */}
+        {/* 3D Interaction Instructions Hint */}
         {viewMode === '3d' && (
-          <div className={`absolute top-4 right-4 rounded-lg px-3 py-1.5 text-xs font-mono font-semibold border backdrop-blur-sm shadow-md flex items-center gap-2 ${theme === 'dark' ? 'bg-slate-800/80 border-slate-700 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-            <Compass className="w-3.5 h-3.5 text-blue-500" />
-            <span>Elev: {Math.round(rotX)}°</span>
-            <span className="text-slate-400">|</span>
-            <span>Azim: {Math.round(rotY)}°</span>
+          <div className={`absolute top-4 right-4 rounded-lg px-3 py-1.5 text-[11px] font-mono border backdrop-blur-sm shadow-md pointer-events-none ${theme === 'dark' ? 'bg-slate-800/80 border-slate-700 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+            <span>Drag: Orbit 3D</span> | <span>Scroll: Zoom</span> | <span>Click: Inspect ROI</span>
           </div>
         )}
       </div>
 
       {/* ─── Bottom Anatomical Inspector Drawer ────────────────────────────── */}
-      <div className={`p-4 border-t transition-colors ${theme === 'dark' ? 'bg-slate-900/90 border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`}>
+      <div className={`p-4 border-t transition-colors ${theme === 'dark' ? 'bg-[#0c1220] border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`}>
         {selectedNode ? (
           <div className="space-y-3">
             <div className="flex items-start justify-between">
@@ -781,7 +611,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
           <div className="flex items-center justify-between text-xs text-slate-400">
             <div className="flex items-center gap-2">
               <Info className="w-4 h-4 text-blue-400 flex-shrink-0" />
-              <span>Interactive Glass Brain: Drag canvas to rotate 3D camera. Click any node to inspect stereotaxic coordinates and clinical functional pathways.</span>
+              <span>3D WebGL Glass Brain: Click and drag to orbit in true 3D space. Hover or click any glowing region to inspect stereotaxic coordinates and clinical circuits.</span>
             </div>
             <span className="font-mono font-semibold text-slate-500">15 Salient Regions Active</span>
           </div>
