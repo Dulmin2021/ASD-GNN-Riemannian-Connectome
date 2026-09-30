@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import { RotateCw, Layers, Info, Sun, Moon, Play, Pause, RefreshCw, Eye } from 'lucide-react'
+import TriPlanarView from './TriPlanarView'
 
 // ─── Lobe Colors (High-contrast neuroimaging palette) ─────────────────────────
 const LOBE_COLORS = {
@@ -575,49 +576,49 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
         ) : viewMode === '3d' ? (
           <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
         ) : (
-          /* Nilearn Tri-Planar Fallback Layout */
-          <div className="w-full h-full p-4 flex flex-col justify-center items-center">
-            <div className="grid grid-cols-3 gap-4 w-full max-w-4xl text-center">
-              {['Sagittal (Lateral)', 'Coronal (Frontal)', 'Axial (Horizontal)'].map((plane, i) => (
-                <div key={plane} className={`p-4 rounded-xl border flex flex-col items-center justify-center h-80 ${theme === 'dark' ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <h4 className="font-bold text-xs text-blue-400 mb-2">{plane}</h4>
-                  <div className="w-32 h-32 rounded-full border border-dashed border-slate-500/50 flex items-center justify-center text-xs text-slate-400">
-                    Orthogonal {plane.split(' ')[0]}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-3 font-mono">MNI-152 Slice Projection</p>
-                </div>
-              ))}
-            </div>
+          <TriPlanarView
+            nodes={nodes}
+            filteredEdges={filteredEdges}
+            activeNodeIds={activeNodeIds}
+            selectedNode={selectedNode}
+            onSelectNode={setSelectedNode}
+            theme={theme}
+            lobeColors={LOBE_COLORS}
+            tractColors={TRACT_COLORS}
+          />
+        )}
+
+        {/* Anatomical Lobe Legend Overlay (3D view only) */}
+        {viewMode === '3d' && (
+          <div className={`absolute top-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1.5 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
+            <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">AAL Anatomical Lobes</div>
+            {Object.entries(LOBE_COLORS).map(([lobe, color]) => (
+              <div key={lobe} className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: color }} />
+                <span className="text-[11px] font-medium">{lobe}</span>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Anatomical Lobe Legend Overlay */}
-        <div className={`absolute top-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1.5 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
-          <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">AAL Anatomical Lobes</div>
-          {Object.entries(LOBE_COLORS).map(([lobe, color]) => (
-            <div key={lobe} className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: color }} />
-              <span className="text-[11px] font-medium">{lobe}</span>
+        {/* Functional Tract Legend Overlay (3D view only) */}
+        {viewMode === '3d' && (
+          <div className={`absolute bottom-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
+            <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">Tract Classification</div>
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-1 rounded-full bg-[#38bdf8]" />
+              <span className="text-[11px]">Default Mode Network (DMN)</span>
             </div>
-          ))}
-        </div>
-
-        {/* Functional Tract Legend Overlay */}
-        <div className={`absolute bottom-4 left-4 rounded-xl p-3 border shadow-xl text-xs space-y-1 backdrop-blur-md pointer-events-none ${theme === 'dark' ? 'bg-slate-900/85 border-slate-800 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-700'}`}>
-          <div className="font-extrabold text-[10px] text-slate-400 uppercase tracking-wider mb-1">Tract Classification</div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1 rounded-full bg-[#38bdf8]" />
-            <span className="text-[11px]">Default Mode Network (DMN)</span>
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-1 rounded-full bg-[#fb923c]" />
+              <span className="text-[11px]">Social Brain (STS/IFG)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-1 rounded-full bg-[#818cf8]" />
+              <span className="text-[11px]">Inter-Hemispheric Bridge</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1 rounded-full bg-[#fb923c]" />
-            <span className="text-[11px]">Social Brain (STS/IFG)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1 rounded-full bg-[#818cf8]" />
-            <span className="text-[11px]">Inter-Hemispheric Bridge</span>
-          </div>
-        </div>
+        )}
 
         {/* 3D Interaction Instructions Hint */}
         {viewMode === '3d' && !isMeshLoading && (
