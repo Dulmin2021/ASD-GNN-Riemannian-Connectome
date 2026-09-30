@@ -154,6 +154,26 @@ def health_check():
         "abide_sites": 17
     }
 
+@app.get("/api/v1/brain_mesh")
+def get_brain_mesh():
+    """Returns authentic MNI-152 cortical surface mesh as a binary Float32 buffer."""
+    mesh_path = os.path.join(os.path.dirname(__file__), "webapp", "public", "models", "brain_mesh.bin")
+    if not os.path.exists(mesh_path):
+        mesh_path = os.path.join(os.path.dirname(__file__), "brain_mesh.bin")
+    if not os.path.exists(mesh_path):
+        raise HTTPException(status_code=404, detail="Brain mesh not found")
+    with open(mesh_path, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Content-Length": str(len(content)),
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
+
 @app.post("/api/v1/diagnose", response_model=DiagnosticResponse)
 async def run_diagnosis(
     site_id: str = Query(..., description="ABIDE I acquisition site identifier"),

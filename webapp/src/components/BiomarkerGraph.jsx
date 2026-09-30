@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
 import * as THREE from 'three'
-import { RotateCw, Layers, Compass, Info, Sun, Moon, Play, Pause, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { RotateCw, Layers, Info, Sun, Moon, Play, Pause, RefreshCw, Eye } from 'lucide-react'
 
-// ─── Lobe Colors (High-contrast medical palette) ──────────────────────────────
+// ─── Lobe Colors (High-contrast neuroimaging palette) ─────────────────────────
 const LOBE_COLORS = {
   Frontal:     '#3b82f6', // Electric Blue
   Parietal:    '#a855f7', // Vivid Purple
@@ -19,89 +19,113 @@ const TRACT_COLORS = {
   All:            '#818cf8', // Indigo
 }
 
-// Convert MNI coordinates [x, y, z] to Three.js coordinates
-// In MNI: +X = Right, +Y = Anterior, +Z = Superior
+// Convert MNI stereotaxic coordinates [x, y, z] to Three.js coordinates
+// In MNI-152: +X = Right, +Y = Anterior, +Z = Superior
 // In Three.js: +X = Right, +Y = Superior (up), +Z = Anterior (towards camera)
-function mniToThree(mni, scale = 0.08) {
+export function mniToThree(mni, scale = 0.08) {
   const [x, y, z] = mni
   return new THREE.Vector3(x * scale, z * scale, y * scale)
 }
 
-// ─── Procedural Anatomical Glass Brain Geometry Generator ────────────────────
-// Generates dual-hemisphere cortex surface with gyral/sulcal anatomical contours
-function createGlassBrainGeometry() {
-  const geom = new THREE.BufferGeometry()
-  const uSegments = 42
-  const vSegments = 42
+// Global in-memory geometry cache to avoid re-fetching / re-parsing across re-renders
+let cachedBrainGeometry = null
+let meshLoadingPromise = null
 
+function loadBrainGeometry() {
+  if (cachedBrainGeometry) return Promise.resolve(cachedBrainGeometry)
+  if (meshLoadingPromise) return meshLoadingPromise
+
+  const urls = [
+    'http://localhost:8000/api/v1/brain_mesh',
+    '/api/v1/brain_mesh',
+    '/models/brain_mesh.bin'
+  ]
+
+  const tryFetch = async (index = 0) => {
+    if (index >= urls.length) throw new Error('All mesh endpoints failed')
+    try {
+      const res = await fetch(urls[index])
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const buffer = await res.arrayBuffer()
+      if (buffer.byteLength < 1000) throw new Error(`Invalid buffer size: ${buffer.byteLength}`)
+      return buffer
+    } catch (err) {
+      console.warn(`Mesh endpoint ${urls[index]} failed:`, err)
+      return tryFetch(index + 1)
+    }
+  }
+
+  meshLoadingPromise = tryFetch()
+    .then(buffer => {
+      const header = new Uint32Array(buffer, 0, 2)
+      const nVerts = header[0]
+      const nFaces = header[1]
+      const positions = new Float32Array(buffer, 8, nVerts * 3)
+      const normals = new Float32Array(buffer, 8 + nVerts * 12, nVerts * 3)
+      const indices = new Uint32Array(buffer, 8 + nVerts * 24, nFaces * 3)
+
+      const geom = new THREE.BufferGeometry()
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+      geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+      geom.setIndex(new THREE.BufferAttribute(indices, 1))
+
+      cachedBrainGeometry = geom
+      return geom
+    })
+    .catch(err => {
+      console.warn("Failed to load authentic brain mesh, falling back to procedural:", err)
+      meshLoadingPromise = null
+      return null
+    })
+
+  return meshLoadingPromise
+}
+
+// Fallback procedural geometry if binary mesh is missing
+function createFallbackBrainGeometry() {
+  const geom = new THREE.BufferGeometry()
+  const uSegments = 36
+  const vSegments = 36
   const positions = []
   const normals = []
-  const uvs = []
   const indices = []
 
-  // Generate anatomical dual-hemisphere mesh
-  for (let hemi = -1; hemi <= 1; hemi += 2) { // -1 for Left, +1 for Right
+  for (let hemi = -1; hemi <= 1; hemi += 2) {
     const baseIndex = positions.length / 3
-
     for (let i = 0; i <= uSegments; i++) {
       const u = i / uSegments
-      const theta = u * Math.PI // 0 to PI (Superior to Inferior)
-
+      const theta = u * Math.PI
       for (let j = 0; j <= vSegments; j++) {
         const v = j / vSegments
-        const phi = v * Math.PI // 0 to PI (Anterior to Posterior)
+        const phi = v * Math.PI
 
-        // Base anatomical ellipsoid parameters for human brain
-        let rx = 3.6
-        let ry = 4.2
+        let rx = 3.8
+        let ry = 4.4
         let rz = 5.2
 
-        // Frontal pole tapering
-        if (phi < Math.PI * 0.3) {
-          rx *= 0.88 + 0.12 * Math.sin(phi / 0.3 * Math.PI * 0.5)
-        }
-        // Occipital lobe tapering
-        if (phi > Math.PI * 0.7) {
-          rx *= 0.82
-          ry *= 0.88
-        }
-        // Temporal lobe lateral bulge
-        if (phi > Math.PI * 0.35 && phi < Math.PI * 0.65 && theta > Math.PI * 0.5) {
-          rx *= 1.15
-        }
-        // Cerebellar postero-inferior bulge
+        if (phi < Math.PI * 0.3) rx *= 0.88
+        if (phi > Math.PI * 0.7) { rx *= 0.82; ry *= 0.88 }
+        if (phi > Math.PI * 0.35 && phi < Math.PI * 0.65 && theta > Math.PI * 0.5) rx *= 1.12
         let cerebellumOffset = 0
-        if (phi > Math.PI * 0.72 && theta > Math.PI * 0.65) {
-          cerebellumOffset = -0.5
-          rx *= 0.95
-        }
+        if (phi > Math.PI * 0.72 && theta > Math.PI * 0.65) cerebellumOffset = -0.5
 
-        // Gyral/Sulcal surface undulations (anatomical wrinkles)
-        const gyri = 0.08 * Math.sin(theta * 14) * Math.cos(phi * 12) +
-                     0.04 * Math.sin(theta * 28 + phi * 20)
-
-        // Parametric coordinates
+        const gyri = 0.06 * Math.sin(theta * 12) * Math.cos(phi * 10)
         const x = hemi * (0.28 + (rx + gyri) * Math.sin(theta) * Math.sin(phi))
         const y = (ry + gyri + cerebellumOffset) * Math.cos(theta)
         const z = (rz + gyri) * Math.cos(phi)
 
         positions.push(x, y, z)
-        uvs.push(u, v)
-
-        // Approximate normal vector
         const norm = new THREE.Vector3(x - hemi * 0.28, y, z).normalize()
         normals.push(norm.x, norm.y, norm.z)
       }
     }
 
-    // Connect grid quads into triangular faces
     for (let i = 0; i < uSegments; i++) {
       for (let j = 0; j < vSegments; j++) {
         const a = baseIndex + i * (vSegments + 1) + j
         const b = baseIndex + (i + 1) * (vSegments + 1) + j
         const c = baseIndex + (i + 1) * (vSegments + 1) + (j + 1)
         const d = baseIndex + i * (vSegments + 1) + (j + 1)
-
         indices.push(a, b, d)
         indices.push(b, c, d)
       }
@@ -110,10 +134,7 @@ function createGlassBrainGeometry() {
 
   geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
-  geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
   geom.setIndex(indices)
-  geom.computeVertexNormals()
-
   return geom
 }
 
@@ -127,7 +148,8 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
   const [selectedNode, setSelectedNode] = useState(null)
   const [autoRotate, setAutoRotate] = useState(true)
   const [glassOpacity, setGlassOpacity] = useState(0.28)
-  const [showWireframe, setShowWireframe] = useState(true)
+  const [showWireframe, setShowWireframe] = useState(false)
+  const [isMeshLoading, setIsMeshLoading] = useState(!cachedBrainGeometry)
 
   // Filter edges based on selected circuit
   const filteredEdges = useMemo(() => {
@@ -152,12 +174,22 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
     return ids
   }, [nodes, filteredEdges, circuitFilter])
 
+  // Pre-load the authentic MNI-152 cortical surface mesh
+  useEffect(() => {
+    if (!cachedBrainGeometry) {
+      setIsMeshLoading(true)
+      loadBrainGeometry().then(() => {
+        setIsMeshLoading(false)
+      })
+    }
+  }, [])
+
   // ─── THREE.JS 3D GLASS BRAIN INITIALIZATION ────────────────────────────────
   useEffect(() => {
-    if (!mountRef.current || viewMode !== '3d') return
+    if (!mountRef.current || viewMode !== '3d' || isMeshLoading) return
     const container = mountRef.current
     const width = container.clientWidth || 680
-    const height = container.clientHeight || 460
+    const height = container.clientHeight || 470
 
     // 1. Scene, Camera, Renderer
     const scene = new THREE.Scene()
@@ -169,7 +201,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
     renderer.setSize(width, height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.2
+    renderer.toneMappingExposure = 1.25
     container.innerHTML = ''
     container.appendChild(renderer.domElement)
 
@@ -178,65 +210,73 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
     scene.background = new THREE.Color(isDark ? 0x090d16 : 0xf8fafc)
 
     // 2. Lighting setup (Medical Holographic Rim Lighting)
-    const ambientLight = new THREE.AmbientLight(0xffffff, isDark ? 0.6 : 0.9)
+    const ambientLight = new THREE.AmbientLight(0xdbeafe, isDark ? 0.65 : 0.9)
     scene.add(ambientLight)
 
-    const keyLight = new THREE.DirectionalLight(0x38bdf8, isDark ? 1.8 : 1.2)
-    keyLight.position.set(10, 15, 10)
+    const keyLight = new THREE.DirectionalLight(0x38bdf8, isDark ? 1.9 : 1.3)
+    keyLight.position.set(12, 16, 12)
     scene.add(keyLight)
 
-    const fillLight = new THREE.DirectionalLight(0xa855f7, isDark ? 1.4 : 0.8)
-    fillLight.position.set(-10, -8, -10)
+    const fillLight = new THREE.DirectionalLight(0xa855f7, isDark ? 1.5 : 0.9)
+    fillLight.position.set(-12, -8, -12)
     scene.add(fillLight)
 
-    const rimLight = new THREE.PointLight(0x38bdf8, isDark ? 3.0 : 1.5, 50)
-    rimLight.position.set(0, 12, -15)
+    const rimLight = new THREE.PointLight(0x22d3ee, isDark ? 3.2 : 1.6, 60)
+    rimLight.position.set(0, 14, -16)
     scene.add(rimLight)
 
+    const baseLight = new THREE.PointLight(0x0284c7, isDark ? 2.0 : 1.0, 50)
+    baseLight.position.set(0, -12, 5)
+    scene.add(baseLight)
+
     // 3. Brain Root Pivot Group
+    // Center of MNI brain mass is around (X: 0.04, Y: 1.16, Z: -1.10)
+    // Offset pivot so rotation revolves perfectly around anterior commissure / thalamus
     const brainGroup = new THREE.Group()
+    brainGroup.position.set(-0.04, -1.16, 1.10)
     scene.add(brainGroup)
 
-    // 4. Procedural Glass Brain Mesh
-    const brainGeometry = createGlassBrainGeometry()
+    // 4. Authentic MNI-152 Cortical Glass Brain Mesh
+    const brainGeometry = cachedBrainGeometry || createFallbackBrainGeometry()
 
-    // Glass Material with real transmissive depth & specular sheen
+    // Translucent Medical Glass Shader with Fresnel Sheen & Subsurface Glow
     const glassMaterial = new THREE.MeshPhysicalMaterial({
-      color: isDark ? 0x38bdf8 : 0x94a3b8,
-      metalness: 0.05,
-      roughness: 0.15,
-      transmission: 0.92,
-      thickness: 1.2,
+      color: isDark ? 0x22d3ee : 0x0284c7,
+      emissive: isDark ? 0x041f2e : 0x0f172a,
+      emissiveIntensity: isDark ? 0.3 : 0.05,
+      metalness: 0.08,
+      roughness: 0.14,
+      transmission: 0.94,
+      ior: 1.45,
+      thickness: 1.8,
       transparent: true,
       opacity: glassOpacity,
-      reflectivity: 0.8,
+      reflectivity: 0.75,
       clearcoat: 1.0,
-      clearcoatRoughness: 0.1,
+      clearcoatRoughness: 0.08,
       side: THREE.DoubleSide,
-      depthWrite: false,
+      depthWrite: false, // Critical: internal nodes & tracts remain 100% visible
     })
 
     const glassMesh = new THREE.Mesh(brainGeometry, glassMaterial)
     brainGroup.add(glassMesh)
 
-    // Optional Holographic Wireframe Overlay
+    // Optional Holographic Sulcal Anatomical Wireframe Overlay
     let wireMesh = null
     if (showWireframe) {
-      const wireGeometry = new THREE.WireframeGeometry(brainGeometry)
-      const wireMaterial = new THREE.LineBasicMaterial({
-        color: isDark ? 0x38bdf8 : 0x64748b,
+      const wireMaterial = new THREE.MeshBasicMaterial({
+        color: isDark ? 0x38bdf8 : 0x0284c7,
+        wireframe: true,
         transparent: true,
-        opacity: isDark ? 0.18 : 0.14,
-        linewidth: 1,
+        opacity: isDark ? 0.035 : 0.025,
+        depthWrite: false,
       })
-      wireMesh = new THREE.LineSegments(wireGeometry, wireMaterial)
+      wireMesh = new THREE.Mesh(brainGeometry, wireMaterial)
       brainGroup.add(wireMesh)
     }
 
     // 5. Connectome Nodes (Luminous 3D Spheres with Outer Glow)
     const nodeMeshes = []
-    const nodeObjectsMap = new Map()
-
     nodes.forEach(node => {
       const pos = mniToThree(node.mni)
       const isActive = activeNodeIds.has(node.id)
@@ -245,42 +285,43 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
       const hexColor = new THREE.Color(isActive ? lobeColor : '#475569')
 
       // Inner Core Sphere
-      const sphereRadius = 0.22 + node.salience * 0.18
+      const sphereRadius = 0.24 + node.salience * 0.20
       const sphereGeom = new THREE.SphereGeometry(sphereRadius, 24, 24)
       const sphereMat = new THREE.MeshStandardMaterial({
         color: hexColor,
         emissive: hexColor,
-        emissiveIntensity: isActive ? (isDark ? 0.85 : 0.4) : 0.1,
+        emissiveIntensity: isActive ? (isDark ? 0.9 : 0.45) : 0.1,
         roughness: 0.2,
-        metalness: 0.2,
+        metalness: 0.25,
       })
       const sphereMesh = new THREE.Mesh(sphereGeom, sphereMat)
       sphereMesh.position.copy(pos)
       sphereMesh.userData = { node }
       brainGroup.add(sphereMesh)
       nodeMeshes.push(sphereMesh)
-      nodeObjectsMap.set(node.id, sphereMesh)
 
       // Outer Glow Halo Sprite
       if (isActive && isDark) {
-        const haloGeom = new THREE.SphereGeometry(sphereRadius * 1.6, 16, 16)
+        const haloGeom = new THREE.SphereGeometry(sphereRadius * 1.55, 16, 16)
         const haloMat = new THREE.MeshBasicMaterial({
           color: hexColor,
           transparent: true,
-          opacity: 0.25,
+          opacity: 0.28,
           side: THREE.BackSide,
+          depthWrite: false,
         })
         const haloMesh = new THREE.Mesh(haloGeom, haloMat)
         haloMesh.position.copy(pos)
         brainGroup.add(haloMesh)
       }
 
-      // Selection Ring
+      // Selection Pulsing Ring
       if (isSelected) {
-        const ringGeom = new THREE.RingGeometry(sphereRadius * 1.5, sphereRadius * 1.8, 32)
+        const ringGeom = new THREE.RingGeometry(sphereRadius * 1.5, sphereRadius * 1.85, 32)
         const ringMat = new THREE.MeshBasicMaterial({
           color: 0xf59e0b,
           side: THREE.DoubleSide,
+          depthWrite: false,
         })
         const ringMesh = new THREE.Mesh(ringGeom, ringMat)
         ringMesh.position.copy(pos)
@@ -304,10 +345,10 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
       const p2 = mniToThree(tNode.mni)
       const isActive = activeNodeIds.has(sId) && activeNodeIds.has(tId)
 
-      // Quadratic Curve through Brain Matter (bowing outwards)
+      // Curve through brain matter
       const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5)
       const centerVec = midPoint.clone().normalize()
-      midPoint.addScaledVector(centerVec, 0.45) // Curve outward
+      midPoint.addScaledVector(centerVec, 0.35)
 
       const curve = new THREE.QuadraticBezierCurve3(p1, midPoint, p2)
       const tubeRadius = (0.04 + edge.weight * 0.05)
@@ -317,17 +358,18 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
       const tubeMat = new THREE.MeshStandardMaterial({
         color: tractColor,
         emissive: tractColor,
-        emissiveIntensity: isActive ? (isDark ? 0.9 : 0.4) : 0.08,
+        emissiveIntensity: isActive ? (isDark ? 0.95 : 0.45) : 0.08,
         transparent: true,
-        opacity: isActive ? 0.85 : 0.15,
+        opacity: isActive ? 0.88 : 0.15,
         roughness: 0.3,
+        depthWrite: false,
       })
 
       const tubeMesh = new THREE.Mesh(tubeGeom, tubeMat)
       brainGroup.add(tubeMesh)
       tractMeshes.push(tubeMesh)
 
-      // Pulse Particle animating along the curve
+      // Pulse Particle animating along the fiber tract
       if (isActive && isDark && edge.type === 'long-range') {
         const partGeom = new THREE.SphereGeometry(tubeRadius * 1.5, 8, 8)
         const partMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
@@ -402,7 +444,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
 
       // Auto-spin if enabled and user is not dragging
       if (autoRotate && !isMouseDown) {
-        brainGroup.rotation.y += 0.006
+        brainGroup.rotation.y += 0.0055
       }
 
       // Animate pulsing fiber particles
@@ -426,11 +468,10 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
       container.removeEventListener('wheel', onWheel)
       container.removeEventListener('click', onClick)
       renderer.dispose()
-      brainGeometry.dispose()
       glassMaterial.dispose()
       container.innerHTML = ''
     }
-  }, [viewMode, theme, nodes, filteredEdges, circuitFilter, selectedNode, autoRotate, glassOpacity, showWireframe, activeNodeIds])
+  }, [viewMode, theme, nodes, filteredEdges, circuitFilter, selectedNode, autoRotate, glassOpacity, showWireframe, activeNodeIds, isMeshLoading])
 
   return (
     <div className={`relative w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col border ${theme === 'dark' ? 'bg-[#090d16] border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -444,7 +485,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
             onClick={() => setViewMode('3d')}
             className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === '3d' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            <RotateCw className="w-3.5 h-3.5" /> 3D WebGL Glass Brain
+            <RotateCw className="w-3.5 h-3.5" /> 3D Anatomical Glass Brain
           </button>
           <button
             onClick={() => setViewMode('triplanar')}
@@ -472,14 +513,32 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
             </select>
           </div>
 
+          {/* Glass Opacity Dropdown */}
+          {viewMode === '3d' && (
+            <div className="flex items-center gap-1">
+              <Eye className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={glassOpacity}
+                onChange={(e) => setGlassOpacity(parseFloat(e.target.value))}
+                title="Glass Transparency"
+                className={`text-xs font-semibold rounded-lg px-2 py-1.5 border focus:outline-none ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-700'}`}
+              >
+                <option value={0.15}>Sheer (15%)</option>
+                <option value={0.25}>Glass (25%)</option>
+                <option value={0.40}>Frosted (40%)</option>
+                <option value={0.65}>Opaque (65%)</option>
+              </select>
+            </div>
+          )}
+
           {/* Wireframe Toggle */}
           {viewMode === '3d' && (
             <button
               onClick={() => setShowWireframe(!showWireframe)}
-              title="Toggle anatomical wireframe grid"
-              className={`px-2 py-1.5 rounded-lg border text-xs font-semibold ${showWireframe ? 'bg-blue-600 text-white border-blue-500' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'}`}
+              title="Toggle sulcal wireframe grid"
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${showWireframe ? 'bg-blue-600 text-white border-blue-500 shadow-sm' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'}`}
             >
-              Grid
+              Sulcal Grid
             </button>
           )}
 
@@ -488,7 +547,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
             <button
               onClick={() => setAutoRotate(!autoRotate)}
               title={autoRotate ? "Pause 3D rotation" : "Auto-rotate 3D brain"}
-              className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 font-semibold ${autoRotate ? 'bg-blue-600 text-white border-blue-500' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-700'}`}
+              className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 font-semibold transition-all ${autoRotate ? 'bg-blue-600 text-white border-blue-500 shadow-sm' : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'}`}
             >
               {autoRotate ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               <span className="hidden md:inline">{autoRotate ? 'Spin' : 'Paused'}</span>
@@ -499,7 +558,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             title="Toggle Dark Neuro-Glow / Clinical White theme"
-            className={`p-1.5 rounded-lg border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
+            className={`p-1.5 rounded-lg border transition-all ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
@@ -508,7 +567,12 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
 
       {/* ─── 3D WebGL Canvas Container ─────────────────────────────── */}
       <div className="relative w-full h-[470px] select-none flex items-center justify-center">
-        {viewMode === '3d' ? (
+        {isMeshLoading ? (
+          <div className="flex flex-col items-center justify-center gap-3">
+            <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+            <span className="text-xs font-mono text-slate-400">Loading High-Precision MNI-152 Cortical Surface...</span>
+          </div>
+        ) : viewMode === '3d' ? (
           <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
         ) : (
           /* Nilearn Tri-Planar Fallback Layout */
@@ -556,7 +620,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
         </div>
 
         {/* 3D Interaction Instructions Hint */}
-        {viewMode === '3d' && (
+        {viewMode === '3d' && !isMeshLoading && (
           <div className={`absolute top-4 right-4 rounded-lg px-3 py-1.5 text-[11px] font-mono border backdrop-blur-sm shadow-md pointer-events-none ${theme === 'dark' ? 'bg-slate-800/80 border-slate-700 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
             <span>Drag: Orbit 3D</span> | <span>Scroll: Zoom</span> | <span>Click: Inspect ROI</span>
           </div>
@@ -611,7 +675,7 @@ export default function BiomarkerGraph({ nodes = [], edges = [] }) {
           <div className="flex items-center justify-between text-xs text-slate-400">
             <div className="flex items-center gap-2">
               <Info className="w-4 h-4 text-blue-400 flex-shrink-0" />
-              <span>3D WebGL Glass Brain: Click and drag to orbit in true 3D space. Hover or click any glowing region to inspect stereotaxic coordinates and clinical circuits.</span>
+              <span>3D WebGL Glass Brain: Click and drag to orbit in authentic MNI-152 space. Hover or click any glowing region to inspect stereotaxic coordinates and clinical circuits.</span>
             </div>
             <span className="font-mono font-semibold text-slate-500">15 Salient Regions Active</span>
           </div>
