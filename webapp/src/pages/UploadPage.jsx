@@ -7,6 +7,7 @@ import { runDiagnosis } from '../api/client'
 const SITES = [
   'CALTECH','CMU','KKI','LEUVEN','MAX_MUN','NYU','OHSU',
   'OLIN','PITT','SBL','SDSU','STANFORD','TRINITY','UCLA_1','UCLA_2','UM_1','YALE',
+  'OTHER (Generic / Uncalibrated Scanner)'
 ]
 
 export default function UploadPage() {
@@ -105,11 +106,11 @@ export default function UploadPage() {
             onChange={e => setSite(e.target.value)}
             className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           >
-            <option value="">— Select ABIDE site —</option>
+            <option value="">— Select acquisition site / scanner —</option>
             {SITES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <p className="text-xs text-slate-400 mt-2">
-            Site metadata is used by the ComBat harmonization module to correct scanner bias.
+            Site metadata is used by Empirical Bayes ComBat &amp; Riemannian Harmonization to eliminate multi-site scanner hardware bias. For non-ABIDE scans, select &quot;OTHER (Generic / Uncalibrated Scanner)&quot;.
           </p>
         </div>
 
